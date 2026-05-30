@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="勇者">
+  <rect width="64" height="64" fill="none"/>
+  <path d="M20 9h24v8h6v12h-5v7h-8v6h8v13h-8v-8H27v8h-8V42h8v-6h-8v-7h-5V17h6z" fill="#1b1a21"/>
+  <path d="M22 11h20v8h6v8h-5v6h-6v6h-10v-6h-6v-6h-5v-8h6z" fill="#f2c48b"/>
+  <path d="M21 9h22v6h6v6H15v-6h6z" fill="#5b7bea"/>
+  <path d="M24 4h16v7H24z" fill="#ffe48d"/>
+  <path d="M18 21h28v6H18z" fill="#354c9e"/>
+  <path d="M22 33h20v10H22z" fill="#d94747"/>
+  <path d="M27 43h10v12H27z" fill="#5b7bea"/>
+  <path d="M19 43h8v10h-8zM37 43h8v10h-8z" fill="#23305f"/>
+  <path d="M21 55h13v5H21zM31 55h13v5H31z" fill="#1b1a21"/>
+  <path d="M23 25h6v4h-6zM35 25h6v4h-6z" fill="#1b1a21"/>
+  <path d="M29 31h6v3h-6z" fill="#9b532c"/>
+  <path d="M48 31h6v20h-6z" fill="#7e5a35"/>
+  <path d="M45 27h12v6H45z" fill="#d8dbe9"/>
+</svg>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="式の展開と因数分解をRPG風に学べる数学学習アプリ" />
+    <title>Math Quest - 式の展開と因数分解</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <div class="result-overlay" id="resultOverlay" aria-live="polite"></div>
+      <div class="auth-panel" aria-label="ログイン">
+        <div class="auth-status" id="authStatus">ゲスト保存</div>
+        <button class="auth-button" id="loginButton" type="button">Googleログイン</button>
+        <button class="auth-button is-hidden" id="logoutButton" type="button">ログアウト</button>
+      </div>
+      <section class="screen home-screen is-active" id="homeScreen" aria-labelledby="homeTitle">
+        <div class="home-sky"></div>
+        <div class="home-castle" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="home-content">
+          <p class="home-kicker">Math Aquarium RPG</p>
+          <h1 id="homeTitle">Math Quest</h1>
+          <p class="home-subtitle">式の展開と因数分解の洞窟</p>
+          <div class="home-party" aria-hidden="true">
+            <img src="assets/hero.svg" alt="" />
+            <img src="assets/slime.svg" alt="" />
+          </div>
+          <div class="home-menu">
+            <button class="menu-button primary" id="startButton" type="button">冒険をはじめる</button>
+            <button class="menu-button" id="resetButton" type="button">記録をリセット</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen game-screen" id="gameScreen" aria-label="ゲーム画面">
+        <header class="game-hud">
+          <div class="hud-group">
+            <span class="hud-label">勇者</span>
+            <strong id="heroName">アルス</strong>
+          </div>
+          <div class="hud-group">
+            <span class="hud-label">Lv</span>
+            <strong id="levelValue">1</strong>
+          </div>
+          <div class="hud-group">
+            <span class="hud-label">EXP</span>
+            <strong id="expValue">0</strong>
+          </div>
+          <div class="hud-group">
+            <span class="hud-label">討伐</span>
+            <strong id="clearValue">0</strong>
+          </div>
+          <button class="icon-command" id="homeButton" type="button" aria-label="ホームへ戻る">⌂</button>
+        </header>
+
+        <main class="adventure-layout">
+          <section class="world" id="worldStage" aria-label="フィールド">
+            <div class="tile-map" aria-hidden="true"></div>
+            <div class="shadow hero-shadow" aria-hidden="true"></div>
+            <div class="shadow slime-shadow" id="slimeShadow" aria-hidden="true"></div>
+            <img class="sprite hero-sprite" id="heroSprite" src="assets/hero.svg" alt="勇者" />
+            <img class="sprite slime-sprite" id="slimeSprite" src="assets/slime.svg" alt="スライム" />
+            <div class="slash" id="slashEffect" aria-hidden="true"></div>
+            <div class="damage-pop" id="damagePop" aria-hidden="true">正解!</div>
+            <div class="victory-toast" id="victoryToast" aria-hidden="true">スライム撃破! EXP +10</div>
+          </section>
+
+          <section class="problem-panel" id="problemPanel" aria-label="問題">
+            <div class="problem-meta">
+              <span id="sourceLabel">練習問題</span>
+              <span id="typeLabel">展開</span>
+            </div>
+            <div class="problem-text math-copy" id="problemText">スライムに近づくと問題があらわれる。</div>
+            <div class="hint-card is-hidden" id="hintCard" aria-live="polite">
+              <div class="hint-title">ヒント</div>
+              <div class="hint-body math-copy" id="hintBody"></div>
+            </div>
+            <div class="solution-card is-hidden" id="solutionCard" aria-live="polite">
+              <div class="solution-title">解答・解説</div>
+              <div class="solution-answer math-copy" id="solutionAnswer"></div>
+              <div class="solution-explanation math-copy" id="solutionExplanation"></div>
+              <p class="grade-note">自分のノートと見くらべて、○か×を選ぼう。</p>
+            </div>
+          </section>
+        </main>
+
+        <footer class="battle-panel" aria-label="バトルコマンド">
+          <div class="message-box" id="messageBox">スライムがあらわれた！</div>
+          <div class="command-grid">
+            <button class="command-button" id="attackButton" type="button">たたかう</button>
+            <button class="command-button" id="answerButton" type="button" disabled>まるつけ</button>
+            <button class="command-button" id="hintButton" type="button" disabled>ヒント</button>
+            <button class="command-button" id="correctButton" type="button" disabled>○ できた</button>
+            <button class="command-button" id="wrongButton" type="button" disabled>× まだ</button>
+            <button class="command-button" id="retryButton" type="button" disabled>もう一度</button>
+            <button class="command-button" id="nextButton" type="button" disabled>すすむ</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js" defer></script>
+    <script src="app.js" defer></script>
+  </body>
+</html>

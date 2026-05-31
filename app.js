@@ -289,6 +289,14 @@ const problems = [
   }
 ];
 
+function selectFirst(...selectors) {
+  for (const selector of selectors) {
+    const node = document.querySelector(selector);
+    if (node) return node;
+  }
+  return null;
+}
+
 const elements = {
   app: document.querySelector("#app"),
   resultOverlay: document.querySelector("#resultOverlay"),
@@ -300,14 +308,14 @@ const elements = {
   officeScreen: document.querySelector("#officeScreen"),
   gameScreen: document.querySelector("#gameScreen"),
   authStatus: document.querySelector("#authStatus"),
-  loginButton: document.querySelector("#loginButton"),
+  loginButton: selectFirst("#loginButton", "#googleLoginButton", "[data-action='google-login']"),
   logoutButton: document.querySelector("#logoutButton"),
   heroNameModal: document.querySelector("#heroNameModal"),
   heroNameInput: document.querySelector("#heroNameInput"),
   heroNameSaveButton: document.querySelector("#heroNameSaveButton"),
   heroNameCancelButton: document.querySelector("#heroNameCancelButton"),
   heroNameError: document.querySelector("#heroNameError"),
-  startButton: document.querySelector("#startButton"),
+  startButton: selectFirst("#startButton", "#guestStartButton", "[data-action='guest-start']"),
   resetButton: document.querySelector("#resetButton"),
   homeButton: document.querySelector("#homeButton"),
   toMapButton: document.querySelector("#toMapButton"),
@@ -378,10 +386,12 @@ const profileDocId = "main";
 const rpgStorageKey = "mathQuestRpgProblemsV2";
 const rpgStorageKeyLegacy = "mathQuestRpgProblemsV1";
 const rpgStateStorageKey = "mathQuestRpgStateV1";
+const loginStartStorageKey = "mathQuestOpenVillageAfterLogin";
 let deck = [];
 let auth = null;
 let db = null;
 let currentUser = null;
+let shouldOpenVillageAfterLogin = false;
 let cloudSaveTimer = null;
 let isLoadingCloud = false;
 let rpgProblems = {};
@@ -496,6 +506,36 @@ function updateAuthUi(statusText) {
   const loggedIn = Boolean(currentUser);
   elements.loginButton.classList.toggle("is-hidden", loggedIn);
   elements.logoutButton.classList.toggle("is-hidden", !loggedIn);
+}
+
+function rememberLoginStart() {
+  shouldOpenVillageAfterLogin = true;
+  try {
+    sessionStorage.setItem(loginStartStorageKey, "1");
+  } catch {
+    // sessionStorage may be unavailable in some privacy modes.
+  }
+}
+
+function consumeLoginStart() {
+  let remembered = shouldOpenVillageAfterLogin;
+  try {
+    remembered = remembered || sessionStorage.getItem(loginStartStorageKey) === "1";
+    sessionStorage.removeItem(loginStartStorageKey);
+  } catch {
+    // Ignore storage access failures and use the in-memory flag.
+  }
+  shouldOpenVillageAfterLogin = false;
+  return remembered;
+}
+
+function clearLoginStart() {
+  shouldOpenVillageAfterLogin = false;
+  try {
+    sessionStorage.removeItem(loginStartStorageKey);
+  } catch {
+    // Ignore storage access failures.
+  }
 }
 
 function learningDocRef() {
@@ -755,13 +795,19 @@ function initFirebase() {
 
     const provider = new window.firebase.auth.GoogleAuthProvider();
     elements.loginButton.addEventListener("click", async () => {
+      rememberLoginStart();
       try {
-        await auth.signInWithPopup(provider);
+        const result = await auth.signInWithPopup(provider);
+        currentUser = result?.user || currentUser;
+        if (consumeLoginStart()) {
+          openVillage();
+        }
       } catch (error) {
         if (error.code === "auth/popup-blocked") {
           await auth.signInWithRedirect(provider);
           return;
         }
+        clearLoginStart();
         console.warn("Google sign-in failed", error);
         updateAuthUi("ログインに失敗しました");
       }
@@ -777,8 +823,20 @@ function initFirebase() {
         updateAuthUi(`${user.displayName || user.email || "ログイン中"}`);
         void loadCloudProgress()
           .then(() => ensureHeroNameAfterLogin())
-          .then(() => loadRpgProgress());
+          .then(() => loadRpgProgress())
+          .then(() => {
+            if (consumeLoginStart()) {
+              openVillage();
+            }
+          })
+          .catch((error) => {
+            console.warn("Login setup failed", error);
+            if (consumeLoginStart()) {
+              openVillage();
+            }
+          });
       } else {
+        clearLoginStart();
         updateAuthUi("ゲスト保存");
       }
     });
@@ -984,10 +1042,20 @@ function showScreen(screenName) {
     game: elements.gameScreen
   };
 
-  Object.entries(mapping).forEach(([key, node]) => {
+  const target = mapping[screenName] || elements.homeScreen;
+  const allScreens = document.querySelectorAll ? document.querySelectorAll(".screen") : [];
+  if (allScreens.length > 0) {
+    allScreens.forEach((node) => {
+      node.classList.toggle("is-active", node === target);
+    });
+    return Boolean(target);
+  }
+
+  Object.entries(mapping).forEach(([, node]) => {
     if (!node) return;
-    node.classList.toggle("is-active", key === screenName);
+    node.classList.toggle("is-active", node === target);
   });
+  return Boolean(target);
 }
 
 function pad3(numberValue) {
@@ -1260,9 +1328,9 @@ function drawProblem() {
   setMessage("スライムがあらわれた！");
 }
 
-function startGame() {
-  showScreen("village");
-  renderProgress();
+function startGame(event) {
+  event?.preventDefault?.();
+  openVillage();
   void ensureHeroName();
 }
 
@@ -2016,16 +2084,16 @@ function drawFieldRoundedRect(ctx, x, y, width, height, radius) {
   ctx.quadraticCurveTo(x, y, x + r, y);
 }
 
-elements.startButton.addEventListener("click", startGame);
-elements.resetButton.addEventListener("click", resetProgress);
-elements.homeButton.addEventListener("click", openVillage);
-elements.attackButton.addEventListener("click", openProblem);
-elements.answerButton.addEventListener("click", revealSolution);
-elements.hintButton.addEventListener("click", showHint);
-elements.correctButton.addEventListener("click", markCorrect);
-elements.wrongButton.addEventListener("click", markWrong);
-elements.retryButton.addEventListener("click", retryProblem);
-elements.nextButton.addEventListener("click", drawProblem);
+if (elements.startButton) elements.startButton.addEventListener("click", startGame);
+if (elements.resetButton) elements.resetButton.addEventListener("click", resetProgress);
+if (elements.homeButton) elements.homeButton.addEventListener("click", openVillage);
+if (elements.attackButton) elements.attackButton.addEventListener("click", openProblem);
+if (elements.answerButton) elements.answerButton.addEventListener("click", revealSolution);
+if (elements.hintButton) elements.hintButton.addEventListener("click", showHint);
+if (elements.correctButton) elements.correctButton.addEventListener("click", markCorrect);
+if (elements.wrongButton) elements.wrongButton.addEventListener("click", markWrong);
+if (elements.retryButton) elements.retryButton.addEventListener("click", retryProblem);
+if (elements.nextButton) elements.nextButton.addEventListener("click", drawProblem);
 
 if (elements.toMapButton) elements.toMapButton.addEventListener("click", () => showScreen("map"));
 if (elements.toOfficeButton) elements.toOfficeButton.addEventListener("click", () => showScreen("office"));

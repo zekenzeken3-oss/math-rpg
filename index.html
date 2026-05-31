@@ -5,25 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="式の展開と因数分解をRPG風に学べる数学学習アプリ" />
     <title>Math Quest - 式の展開と因数分解</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23245f38'/%3E%3Cpath d='M16 42c0-11 7-22 16-22s16 11 16 22c0 7-7 12-16 12s-16-5-16-12Z' fill='%2355c8ff'/%3E%3Ccircle cx='26' cy='38' r='3' fill='%2317120a'/%3E%3Ccircle cx='38' cy='38' r='3' fill='%2317120a'/%3E%3Cpath d='M25 45c4 4 10 4 14 0' stroke='%2317120a' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app" id="app">
       <div class="result-overlay" id="resultOverlay" aria-live="polite"></div>
+
       <div class="auth-panel" aria-label="ログイン">
         <div class="auth-status" id="authStatus">ゲスト保存</div>
         <button class="auth-button" id="loginButton" type="button">Googleログイン</button>
         <button class="auth-button is-hidden" id="logoutButton" type="button">ログアウト</button>
       </div>
+
+      <div class="modal is-hidden" id="heroNameModal" role="dialog" aria-modal="true" aria-labelledby="heroNameTitle">
+        <div class="modal-backdrop" data-close="heroNameModal" aria-hidden="true"></div>
+        <div class="modal-card">
+          <h2 class="modal-title" id="heroNameTitle">勇者名を決めよう</h2>
+          <p class="modal-text">ログイン後は勇者名をFirestoreに保存します。</p>
+          <div class="modal-row">
+            <input class="modal-input" id="heroNameInput" type="text" inputmode="text" maxlength="12" placeholder="勇者名（12文字まで）" />
+          </div>
+          <div class="modal-actions">
+            <button class="menu-button primary" id="heroNameSaveButton" type="button">決定</button>
+            <button class="menu-button" id="heroNameCancelButton" type="button">あとで</button>
+          </div>
+          <div class="modal-error is-hidden" id="heroNameError" aria-live="polite"></div>
+        </div>
+      </div>
+
       <section class="screen home-screen is-active" id="homeScreen" aria-labelledby="homeTitle">
         <div class="home-sky"></div>
         <div class="home-castle" aria-hidden="true">
           <span></span><span></span><span></span>
         </div>
         <div class="home-content">
-          <p class="home-kicker">Math Aquarium RPG</p>
+          <p class="home-kicker">Math RPG</p>
           <h1 id="homeTitle">Math Quest</h1>
-          <p class="home-subtitle">式の展開と因数分解の洞窟</p>
+          <p class="home-subtitle">式の展開と因数分解</p>
           <div class="home-party" aria-hidden="true">
             <img src="assets/hero.svg" alt="" />
             <img src="assets/slime.svg" alt="" />
@@ -31,6 +50,112 @@
           <div class="home-menu">
             <button class="menu-button primary" id="startButton" type="button">冒険をはじめる</button>
             <button class="menu-button" id="resetButton" type="button">記録をリセット</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen village-screen" id="villageScreen" aria-labelledby="villageTitle">
+        <div class="home-sky"></div>
+        <div class="home-castle" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="home-content">
+          <p class="home-kicker">拠点</p>
+          <h2 id="villageTitle" class="screen-title">村</h2>
+          <p class="home-subtitle">どこへ行く？</p>
+          <div class="home-menu">
+            <button class="menu-button primary" id="toMapButton" type="button">マップへ</button>
+            <button class="menu-button" id="toOfficeButton" type="button">役場へ</button>
+            <button class="menu-button" id="toStatusButton" type="button">ステータス</button>
+            <button class="menu-button" id="toPracticeButton" type="button">今まで通り問題を解く</button>
+          </div>
+          <div class="home-menu" style="margin-top:12px;">
+            <button class="menu-button" id="renameHeroButton" type="button">勇者名を変更</button>
+            <button class="menu-button" id="backHomeFromVillageButton" type="button">タイトルへ</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen map-screen" id="mapScreen" aria-labelledby="mapTitle">
+        <div class="home-sky"></div>
+        <div class="home-content">
+          <p class="home-kicker">ワールドマップ</p>
+          <h2 id="mapTitle" class="screen-title">行き先を選ぼう</h2>
+          <div class="area-list" aria-label="エリア一覧">
+            <button class="menu-button primary" id="areaExpansionButton" type="button">式と展開と因数分解の草原</button>
+            <button class="menu-button" id="areaSetLogicButton" type="button" disabled>集合と論理の洞窟（準備中）</button>
+          </div>
+          <div class="home-menu" style="margin-top:12px;">
+            <button class="menu-button" id="backVillageFromMapButton" type="button">村へ戻る</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen field-screen" id="fieldScreen" aria-label="草原マップ">
+        <header class="field-hud">
+          <div class="field-hud-left">
+            <div class="field-hud-title" id="fieldTitle">式と展開と因数分解の草原</div>
+            <div class="field-hud-sub" id="fieldSub">スライムにぶつかるとバトル</div>
+          </div>
+          <div class="field-hud-right" aria-label="制覇率">
+            <span class="field-stat">討伐 <strong id="fieldCleared">0</strong>/<strong id="fieldTotal">0</strong></span>
+            <span class="field-stat"><strong id="fieldPercent">0%</strong></span>
+          </div>
+          <button class="icon-command" id="fieldBackButton" type="button" aria-label="マップへ戻る">↩</button>
+        </header>
+
+        <main class="field-stage" aria-label="フィールド">
+          <canvas id="fieldCanvas" class="field-canvas" width="640" height="360"></canvas>
+          <div class="field-fade is-hidden" id="fieldFade" aria-hidden="true"></div>
+          <div class="field-message is-hidden" id="fieldMessage" aria-live="polite">
+            <div class="field-message-box" id="fieldMessageText">スライムがあらわれた！</div>
+          </div>
+
+          <div class="dpad" id="dpad" aria-label="移動">
+            <button class="dpad-btn up" id="dpadUp" type="button" aria-label="上">▲</button>
+            <button class="dpad-btn left" id="dpadLeft" type="button" aria-label="左">◀</button>
+            <button class="dpad-btn right" id="dpadRight" type="button" aria-label="右">▶</button>
+            <button class="dpad-btn down" id="dpadDown" type="button" aria-label="下">▼</button>
+          </div>
+        </main>
+
+        <footer class="field-footer">
+          <button class="menu-button" id="fieldBackVillageButton" type="button">村へ戻る</button>
+        </footer>
+      </section>
+
+      <section class="screen status-screen" id="statusScreen" aria-labelledby="statusTitle">
+        <div class="home-sky"></div>
+        <div class="home-content">
+          <p class="home-kicker">ステータス</p>
+          <h2 id="statusTitle" class="screen-title">勇者の記録</h2>
+          <div class="status-grid" aria-label="ステータス">
+            <div class="status-item"><span>勇者名</span><strong id="statusHeroName">-</strong></div>
+            <div class="status-item"><span>EXP</span><strong id="statusExp">0</strong></div>
+            <div class="status-item"><span>正解数</span><strong id="statusCorrect">0</strong></div>
+            <div class="status-item"><span>間違い数</span><strong id="statusWrong">0</strong></div>
+          </div>
+          <div class="home-menu" style="margin-top:12px;">
+            <button class="menu-button primary" id="statusRenameButton" type="button">勇者名を変更</button>
+            <button class="menu-button" id="backVillageFromStatusButton" type="button">村へ戻る</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen office-screen" id="officeScreen" aria-labelledby="officeTitle">
+        <div class="home-sky"></div>
+        <div class="home-content">
+          <p class="home-kicker">村役場</p>
+          <h2 id="officeTitle" class="screen-title">役場</h2>
+          <p class="home-subtitle">今回は仮実装です</p>
+          <div class="home-menu">
+            <button class="menu-button" type="button" disabled>倒した敵一覧</button>
+            <button class="menu-button" type="button" disabled>苦手問題</button>
+            <button class="menu-button" type="button" disabled>ミス分析</button>
+            <button class="menu-button" type="button" disabled>復習モード</button>
+          </div>
+          <div class="home-menu" style="margin-top:12px;">
+            <button class="menu-button" id="backVillageFromOfficeButton" type="button">村へ戻る</button>
           </div>
         </div>
       </section>
@@ -50,10 +175,10 @@
             <strong id="expValue">0</strong>
           </div>
           <div class="hud-group">
-            <span class="hud-label">討伐</span>
+            <span class="hud-label">正解</span>
             <strong id="clearValue">0</strong>
           </div>
-          <button class="icon-command" id="homeButton" type="button" aria-label="ホームへ戻る">⌂</button>
+          <button class="icon-command" id="homeButton" type="button" aria-label="村へ戻る">⌂</button>
         </header>
 
         <main class="adventure-layout">
@@ -64,25 +189,25 @@
             <img class="sprite hero-sprite" id="heroSprite" src="assets/hero.svg" alt="勇者" />
             <img class="sprite slime-sprite" id="slimeSprite" src="assets/slime.svg" alt="スライム" />
             <div class="slash" id="slashEffect" aria-hidden="true"></div>
-            <div class="damage-pop" id="damagePop" aria-hidden="true">正解!</div>
+            <div class="damage-pop" id="damagePop" aria-hidden="true">ダメージ!</div>
             <div class="victory-toast" id="victoryToast" aria-hidden="true">スライム撃破! EXP +10</div>
           </section>
 
           <section class="problem-panel" id="problemPanel" aria-label="問題">
             <div class="problem-meta">
-              <span id="sourceLabel">練習問題</span>
+              <span id="sourceLabel">練習</span>
               <span id="typeLabel">展開</span>
             </div>
-            <div class="problem-text math-copy" id="problemText">スライムに近づくと問題があらわれる。</div>
+            <div class="problem-text math-copy" id="problemText">スライムに近づくと問題が現れる。</div>
             <div class="hint-card is-hidden" id="hintCard" aria-live="polite">
               <div class="hint-title">ヒント</div>
               <div class="hint-body math-copy" id="hintBody"></div>
             </div>
             <div class="solution-card is-hidden" id="solutionCard" aria-live="polite">
-              <div class="solution-title">解答・解説</div>
+              <div class="solution-title">解答と解説</div>
               <div class="solution-answer math-copy" id="solutionAnswer"></div>
               <div class="solution-explanation math-copy" id="solutionExplanation"></div>
-              <p class="grade-note">自分のノートと見くらべて、○か×を選ぼう。</p>
+              <p class="grade-note">自己採点で○/×を選んでください。</p>
             </div>
           </section>
         </main>

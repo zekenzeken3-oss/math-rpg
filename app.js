@@ -293,13 +293,55 @@ const elements = {
   app: document.querySelector("#app"),
   resultOverlay: document.querySelector("#resultOverlay"),
   homeScreen: document.querySelector("#homeScreen"),
+  villageScreen: document.querySelector("#villageScreen"),
+  mapScreen: document.querySelector("#mapScreen"),
+  fieldScreen: document.querySelector("#fieldScreen"),
+  statusScreen: document.querySelector("#statusScreen"),
+  officeScreen: document.querySelector("#officeScreen"),
   gameScreen: document.querySelector("#gameScreen"),
   authStatus: document.querySelector("#authStatus"),
   loginButton: document.querySelector("#loginButton"),
   logoutButton: document.querySelector("#logoutButton"),
+  heroNameModal: document.querySelector("#heroNameModal"),
+  heroNameInput: document.querySelector("#heroNameInput"),
+  heroNameSaveButton: document.querySelector("#heroNameSaveButton"),
+  heroNameCancelButton: document.querySelector("#heroNameCancelButton"),
+  heroNameError: document.querySelector("#heroNameError"),
   startButton: document.querySelector("#startButton"),
   resetButton: document.querySelector("#resetButton"),
   homeButton: document.querySelector("#homeButton"),
+  toMapButton: document.querySelector("#toMapButton"),
+  toOfficeButton: document.querySelector("#toOfficeButton"),
+  toStatusButton: document.querySelector("#toStatusButton"),
+  toPracticeButton: document.querySelector("#toPracticeButton"),
+  renameHeroButton: document.querySelector("#renameHeroButton"),
+  backHomeFromVillageButton: document.querySelector("#backHomeFromVillageButton"),
+  areaExpansionButton: document.querySelector("#areaExpansionButton"),
+  areaSetLogicButton: document.querySelector("#areaSetLogicButton"),
+  backVillageFromMapButton: document.querySelector("#backVillageFromMapButton"),
+  fieldTitle: document.querySelector("#fieldTitle"),
+  fieldSub: document.querySelector("#fieldSub"),
+  fieldCleared: document.querySelector("#fieldCleared"),
+  fieldTotal: document.querySelector("#fieldTotal"),
+  fieldPercent: document.querySelector("#fieldPercent"),
+  fieldBackButton: document.querySelector("#fieldBackButton"),
+  fieldBackVillageButton: document.querySelector("#fieldBackVillageButton"),
+  fieldCanvas: document.querySelector("#fieldCanvas"),
+  fieldFade: document.querySelector("#fieldFade"),
+  fieldMessage: document.querySelector("#fieldMessage"),
+  fieldMessageText: document.querySelector("#fieldMessageText"),
+  dpad: document.querySelector("#dpad"),
+  dpadUp: document.querySelector("#dpadUp"),
+  dpadDown: document.querySelector("#dpadDown"),
+  dpadLeft: document.querySelector("#dpadLeft"),
+  dpadRight: document.querySelector("#dpadRight"),
+  backVillageFromStatusButton: document.querySelector("#backVillageFromStatusButton"),
+  statusRenameButton: document.querySelector("#statusRenameButton"),
+  backVillageFromOfficeButton: document.querySelector("#backVillageFromOfficeButton"),
+  statusHeroName: document.querySelector("#statusHeroName"),
+  statusExp: document.querySelector("#statusExp"),
+  statusCorrect: document.querySelector("#statusCorrect"),
+  statusWrong: document.querySelector("#statusWrong"),
   heroName: document.querySelector("#heroName"),
   levelValue: document.querySelector("#levelValue"),
   expValue: document.querySelector("#expValue"),
@@ -332,12 +374,22 @@ const elements = {
 
 const storageKey = "mathQuestProgress";
 const learningDocId = "main";
+const profileDocId = "main";
+const rpgStorageKey = "mathQuestRpgProblemsV2";
+const rpgStorageKeyLegacy = "mathQuestRpgProblemsV1";
+const rpgStateStorageKey = "mathQuestRpgStateV1";
 let deck = [];
 let auth = null;
 let db = null;
 let currentUser = null;
 let cloudSaveTimer = null;
 let isLoadingCloud = false;
+let rpgProblems = {};
+let rpgState = { unlockedGates: {} };
+let rpgLoaded = false;
+let areaBusy = false;
+let pendingEncounterTimer = null;
+let heroPosition = { x: 12, y: 72 };
 let state = {
   exp: 0,
   clears: 0,
@@ -348,6 +400,9 @@ let state = {
   misses: 0,
   wrongWords: [],
   history: [],
+  currentAreaId: "",
+  currentProblemId: "",
+  returnScreen: "",
   settings: {
     heroName: "アルス"
   }
@@ -367,11 +422,27 @@ function loadProgress() {
     state.wrongWords = [];
     state.history = [];
   }
+  try {
+    const legacy = JSON.parse(localStorage.getItem(rpgStorageKeyLegacy) || "{}") || {};
+    const current = JSON.parse(localStorage.getItem(rpgStorageKey) || "{}") || {};
+    rpgProblems = { ...legacy, ...current };
+    localStorage.setItem(rpgStorageKey, JSON.stringify(rpgProblems || {}));
+  } catch {
+    rpgProblems = {};
+  }
+  try {
+    const savedRpgState = JSON.parse(localStorage.getItem(rpgStateStorageKey) || "{}") || {};
+    rpgState = { unlockedGates: {}, ...savedRpgState };
+  } catch {
+    rpgState = { unlockedGates: {} };
+  }
   renderProgress();
 }
 
 function saveProgress() {
   localStorage.setItem(storageKey, JSON.stringify(buildLearningData(false)));
+  localStorage.setItem(rpgStorageKey, JSON.stringify(rpgProblems || {}));
+  localStorage.setItem(rpgStateStorageKey, JSON.stringify(rpgState || { unlockedGates: {} }));
   scheduleCloudSave();
 }
 
@@ -398,6 +469,18 @@ function renderProgress() {
   elements.expValue.textContent = String(state.exp);
   elements.clearValue.textContent = String(state.clears);
   elements.heroName.textContent = state.settings.heroName || "アルス";
+  renderStatus();
+}
+
+function renderStatus() {
+  if (!elements.statusHeroName) return;
+  const wrongTotal = Array.isArray(state.wrongWords)
+    ? state.wrongWords.reduce((sum, item) => sum + (Number(item?.count) || 1), 0)
+    : 0;
+  elements.statusHeroName.textContent = state.settings.heroName || "アルス";
+  elements.statusExp.textContent = String(state.exp);
+  elements.statusCorrect.textContent = String(state.clears);
+  elements.statusWrong.textContent = String(wrongTotal);
 }
 
 function firebaseConfigLooksReady() {
@@ -419,12 +502,166 @@ function learningDocRef() {
   return db.collection("users").doc(currentUser.uid).collection("learningData").doc(learningDocId);
 }
 
+function profileDocRef() {
+  return db.collection("users").doc(currentUser.uid).collection("profile").doc(profileDocId);
+}
+
+async function loadRpgProgress() {
+  rpgLoaded = true;
+  if (!db || !currentUser) return;
+  try {
+    const userRef = db.collection("users").doc(currentUser.uid);
+    const snapshot = await userRef.collection("rpgProblems").get();
+
+    const loaded = {};
+    snapshot.forEach((docSnap) => {
+      loaded[docSnap.id] = docSnap.data() || {};
+    });
+    rpgProblems = { ...(rpgProblems || {}), ...loaded };
+    localStorage.setItem(rpgStorageKey, JSON.stringify(rpgProblems || {}));
+
+    const stateSnap = await userRef.collection("rpgState").doc("field").get();
+    if (stateSnap.exists) {
+      rpgState = { unlockedGates: {}, ...(rpgState || {}), ...(stateSnap.data() || {}) };
+      localStorage.setItem(rpgStateStorageKey, JSON.stringify(rpgState || { unlockedGates: {} }));
+    }
+  } catch (error) {
+    console.warn("RPG load failed", error);
+  }
+}
+
+async function saveRpgState() {
+  rpgState = { unlockedGates: {}, ...(rpgState || {}) };
+  localStorage.setItem(rpgStateStorageKey, JSON.stringify(rpgState));
+
+  if (!db || !currentUser) return;
+  try {
+    await db.collection("users").doc(currentUser.uid).collection("rpgState").doc("field").set(
+      {
+        unlockedGates: rpgState.unlockedGates || {},
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    console.warn("RPG state save failed", error);
+  }
+}
+
+async function markRpgCleared(problem, meta = {}) {
+  if (!problem || !problem.problemId) return;
+  const problemId = problem.problemId;
+  const areaId = problem.areaId || meta.areaId || "";
+
+  const nextLocal = {
+    status: "cleared",
+    areaId,
+    lastClearedAtLocal: new Date().toISOString(),
+    correctCount: (Number(rpgProblems?.[problemId]?.correctCount) || 0) + 1
+  };
+
+  rpgProblems = { ...(rpgProblems || {}), [problemId]: { ...(rpgProblems?.[problemId] || {}), ...nextLocal } };
+  localStorage.setItem(rpgStorageKey, JSON.stringify(rpgProblems || {}));
+
+  if (!db || !currentUser) return;
+  try {
+    await db.collection("users").doc(currentUser.uid).collection("rpgProblems").doc(problemId).set(
+      {
+        status: "cleared",
+        areaId,
+        lastClearedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+        correctCount: window.firebase.firestore.FieldValue.increment(1)
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    console.warn("RPG clear save failed", error);
+  }
+}
+
 function applyLearningData(data = {}) {
   state.exp = Number(data.exp) || 0;
   state.clears = Number(data.correctCount ?? data.clears) || 0;
   state.wrongWords = Array.isArray(data.wrongWords) ? data.wrongWords : [];
   state.history = Array.isArray(data.history) ? data.history : [];
   state.settings = { ...state.settings, ...(data.settings || {}) };
+  renderProgress();
+}
+
+function normalizeHeroName(raw) {
+  const name = String(raw || "").trim();
+  if (!name) return "";
+  return name.slice(0, 12);
+}
+
+function setHeroNameLocal(heroName) {
+  const normalized = normalizeHeroName(heroName);
+  if (!normalized) return false;
+  state.settings.heroName = normalized;
+  saveProgress();
+  renderProgress();
+  return true;
+}
+
+function openHeroNameModal(options = {}) {
+  if (!elements.heroNameModal) return;
+  elements.heroNameError.classList.add("is-hidden");
+  elements.heroNameError.textContent = "";
+  elements.heroNameModal.classList.remove("is-hidden");
+  elements.heroNameModal.dataset.force = options.force ? "1" : "0";
+  const initial = state.settings.heroName || "";
+  elements.heroNameInput.value = normalizeHeroName(initial);
+  elements.heroNameInput.focus();
+  elements.heroNameInput.select();
+}
+
+function closeHeroNameModal() {
+  if (!elements.heroNameModal) return;
+  elements.heroNameModal.classList.add("is-hidden");
+  elements.heroNameModal.dataset.force = "0";
+}
+
+async function loadProfile() {
+  if (!db || !currentUser) return;
+  try {
+    const snapshot = await profileDocRef().get();
+    if (!snapshot.exists) return { exists: false, heroName: "" };
+    const data = snapshot.data() || {};
+    const heroName = normalizeHeroName(data.heroName);
+    if (heroName) {
+      state.settings.heroName = heroName;
+      saveProgress();
+      renderProgress();
+    }
+    return { exists: true, heroName };
+  } catch (error) {
+    console.warn("Profile load failed", error);
+    return { exists: false, heroName: "" };
+  }
+}
+
+async function saveProfileHeroName(heroName) {
+  if (!db || !currentUser) return;
+  const normalized = normalizeHeroName(heroName);
+  if (!normalized) throw new Error("heroName is empty");
+
+  const ref = profileDocRef();
+  const now = window.firebase.firestore.FieldValue.serverTimestamp();
+  const base = {
+    heroName: normalized,
+    profileVersion: 1,
+    updatedAt: now
+  };
+
+  const existing = await ref.get();
+  if (!existing.exists) {
+    await ref.set({ ...base, createdAt: now }, { merge: true });
+  } else {
+    await ref.set(base, { merge: true });
+  }
+
+  state.settings.heroName = normalized;
+  saveProgress();
   renderProgress();
 }
 
@@ -476,6 +713,23 @@ async function loadCloudProgress() {
   }
 }
 
+async function ensureHeroName() {
+  const heroName = normalizeHeroName(state.settings.heroName);
+  if (heroName) return;
+
+  if (currentUser) {
+    openHeroNameModal({ force: true });
+    return;
+  }
+}
+
+async function ensureHeroNameAfterLogin() {
+  const profile = await loadProfile();
+  if (!profile || !profile.heroName) {
+    openHeroNameModal({ force: true });
+  }
+}
+
 function initFirebase() {
   if (!elements.loginButton || !elements.logoutButton) return;
 
@@ -521,7 +775,9 @@ function initFirebase() {
       currentUser = user;
       if (user) {
         updateAuthUi(`${user.displayName || user.email || "ログイン中"}`);
-        loadCloudProgress();
+        void loadCloudProgress()
+          .then(() => ensureHeroNameAfterLogin())
+          .then(() => loadRpgProgress());
       } else {
         updateAuthUi("ゲスト保存");
       }
@@ -714,8 +970,256 @@ function recordLearningResult(result) {
 }
 
 function showScreen(screenName) {
-  elements.homeScreen.classList.toggle("is-active", screenName === "home");
-  elements.gameScreen.classList.toggle("is-active", screenName === "game");
+  if (screenName !== "field") {
+    stopFieldLoop();
+  }
+
+  const mapping = {
+    home: elements.homeScreen,
+    village: elements.villageScreen,
+    map: elements.mapScreen,
+    field: elements.fieldScreen,
+    status: elements.statusScreen,
+    office: elements.officeScreen,
+    game: elements.gameScreen
+  };
+
+  Object.entries(mapping).forEach(([key, node]) => {
+    if (!node) return;
+    node.classList.toggle("is-active", key === screenName);
+  });
+}
+
+function pad3(numberValue) {
+  return String(numberValue).padStart(3, "0");
+}
+
+function ensureProblemIds(areaId = "expansion-grass") {
+  problems.forEach((problem, index) => {
+    if (problem.problemId) return;
+    problem.areaId = problem.areaId || areaId;
+    problem.problemId = `${problem.areaId}-${pad3(index + 1)}`;
+  });
+}
+
+function getAreaProblems(areaId) {
+  ensureProblemIds(areaId);
+  return problems.filter((problem) => (problem.areaId || areaId) === areaId);
+}
+
+function isProblemCleared(problemId) {
+  return rpgProblems?.[problemId]?.status === "cleared";
+}
+
+function fieldGateKey(areaId, gateId) {
+  return `${areaId}:${gateId}`;
+}
+
+function isFieldGateUnlocked(areaId, gateId) {
+  return Boolean(rpgState?.unlockedGates?.[fieldGateKey(areaId, gateId)]);
+}
+
+function unlockFieldGate(areaId, gateId) {
+  rpgState = { unlockedGates: {}, ...(rpgState || {}) };
+  rpgState.unlockedGates = { ...(rpgState.unlockedGates || {}), [fieldGateKey(areaId, gateId)]: true };
+  return saveRpgState();
+}
+
+function computeAreaProgress(areaId) {
+  const list = getAreaProblems(areaId);
+  const total = list.length;
+  const cleared = list.reduce((sum, problem) => sum + (isProblemCleared(problem.problemId) ? 1 : 0), 0);
+  const percent = total === 0 ? 0 : Math.floor((cleared / total) * 100);
+  return { total, cleared, percent };
+}
+
+function renderArea(areaId) {
+  state.currentAreaId = areaId;
+  areaBusy = false;
+  if (pendingEncounterTimer) {
+    window.clearTimeout(pendingEncounterTimer);
+    pendingEncounterTimer = null;
+  }
+  const areaName = areaId === "expansion-grass" ? "式と展開と因数分解の草原" : "エリア";
+  if (elements.areaTitle) elements.areaTitle.textContent = areaName;
+  if (elements.areaSubtitle) elements.areaSubtitle.textContent = "スライムをタップして戦闘開始";
+
+  const list = getAreaProblems(areaId);
+  const progress = computeAreaProgress(areaId);
+  if (elements.areaTotal) elements.areaTotal.textContent = String(progress.total);
+  if (elements.areaCleared) elements.areaCleared.textContent = String(progress.cleared);
+  if (elements.areaPercent) elements.areaPercent.textContent = `${progress.percent}%`;
+
+  if (elements.areaClearCard) elements.areaClearCard.classList.toggle("is-hidden", progress.cleared !== progress.total || progress.total === 0);
+
+  if (!elements.areaField) return;
+  elements.areaField.classList.remove("is-locked");
+
+  // Remove previous slimes only (keep hero + encounter overlay)
+  const keepIds = new Set(["fieldHero", "areaEncounter"]);
+  Array.from(elements.areaField.children).forEach((child) => {
+    if (child && child.id && keepIds.has(child.id)) return;
+    if (child && child.classList && child.classList.contains("area-encounter")) return;
+    if (child && child.id === "fieldHero") return;
+    if (child && child.className && String(child.className).includes("field-slime")) child.remove?.();
+  });
+
+  const visibleProblems = list.filter((problem) => !isProblemCleared(problem.problemId)).slice(0, 12);
+  const positions = getGrassPositions();
+
+  // hero initial position
+  setHeroPosition(heroPosition.x, heroPosition.y, false);
+
+  visibleProblems.forEach((problem, index) => {
+    const pos = positions[index % positions.length];
+    const depth = computeDepthFromY(pos.y);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "field-slime";
+    button.style.left = `${pos.x}%`;
+    button.style.top = `${pos.y}%`;
+    button.style.setProperty("--scale", String(depth.scale));
+    button.style.setProperty("--z", String(depth.z));
+    button.dataset.problemId = problem.problemId;
+    button.dataset.areaId = areaId;
+    button.dataset.x = String(pos.x);
+    button.dataset.y = String(pos.y);
+
+    const img = document.createElement("img");
+    img.src = "assets/slime.svg";
+    img.alt = "スライム";
+
+    const label = document.createElement("div");
+    label.className = "field-slime-label";
+    label.textContent = problem.problemId;
+
+    button.append(img, label);
+    button.addEventListener("click", () => beginEncounter(problem, pos));
+    elements.areaField.append(button);
+  });
+}
+
+function computeDepthFromY(yPercent) {
+  const t = Math.max(0, Math.min(1, (yPercent - 12) / 76));
+  const scale = 0.82 + t * 0.38;
+  const z = 2 + Math.round(t * 8);
+  return { scale: Number(scale.toFixed(3)), z };
+}
+
+function clampPercent(value) {
+  return Math.max(6, Math.min(94, value));
+}
+
+function setHeroPosition(xPercent, yPercent, animate = true) {
+  heroPosition = { x: clampPercent(xPercent), y: clampPercent(yPercent) };
+  if (!elements.fieldHero) return;
+  if (!animate) {
+    const prev = elements.fieldHero.style.transition;
+    elements.fieldHero.style.transition = "none";
+    elements.fieldHero.style.left = `${heroPosition.x}%`;
+    elements.fieldHero.style.top = `${heroPosition.y}%`;
+    void elements.fieldHero.offsetWidth;
+    elements.fieldHero.style.transition = prev;
+    return;
+  }
+  elements.fieldHero.style.left = `${heroPosition.x}%`;
+  elements.fieldHero.style.top = `${heroPosition.y}%`;
+}
+
+function getGrassPositions() {
+  return [
+    { x: 20, y: 18 },
+    { x: 44, y: 16 },
+    { x: 72, y: 20 },
+    { x: 84, y: 34 },
+    { x: 62, y: 32 },
+    { x: 34, y: 30 },
+    { x: 16, y: 40 },
+    { x: 48, y: 44 },
+    { x: 76, y: 48 },
+    { x: 24, y: 60 },
+    { x: 56, y: 64 },
+    { x: 84, y: 70 }
+  ];
+}
+
+function showEncounter(text) {
+  if (!elements.areaEncounter) return;
+  if (elements.areaEncounterText) elements.areaEncounterText.textContent = text;
+  elements.areaEncounter.classList.remove("is-hidden");
+}
+
+function hideEncounter() {
+  if (!elements.areaEncounter) return;
+  elements.areaEncounter.classList.add("is-hidden");
+}
+
+function beginEncounter(problem, position) {
+  if (areaBusy) return;
+  areaBusy = true;
+  if (elements.areaField) elements.areaField.classList.add("is-locked");
+  if (elements.fieldHero) elements.fieldHero.classList.add("is-moving");
+
+  // move hero near slime
+  const targetX = clampPercent(position.x - 6);
+  const targetY = clampPercent(position.y + 10);
+  setHeroPosition(targetX, targetY, true);
+
+  let finished = false;
+  const finishMove = () => {
+    if (finished) return;
+    finished = true;
+    if (elements.fieldHero) elements.fieldHero.classList.remove("is-moving");
+    showEncounter("スライムがあらわれた！");
+    pendingEncounterTimer = window.setTimeout(() => {
+      hideEncounter();
+      areaBusy = false;
+      if (elements.areaField) elements.areaField.classList.remove("is-locked");
+      enterBattleWithProblem(problem);
+    }, 1000);
+  };
+
+  if (elements.fieldHero) {
+    elements.fieldHero.addEventListener("transitionend", finishMove, { once: true });
+    window.setTimeout(finishMove, 520);
+  } else {
+    finishMove();
+  }
+}
+
+function openArea(areaId) {
+  hideEncounter();
+  renderArea(areaId);
+  showScreen("area");
+}
+
+function setCurrentProblem(problem) {
+  state.current = problem;
+  state.currentProblemId = problem.problemId || "";
+  state.problemOpen = false;
+  state.solutionOpen = false;
+  state.defeated = false;
+  state.misses = 0;
+  elements.sourceLabel.textContent = state.current.source;
+  elements.typeLabel.textContent = state.current.type;
+  renderLatexText(elements.problemText, "スライムに近づくと問題が現れる。");
+  hideHint();
+  hideSolution();
+  elements.slimeSprite.classList.remove("is-defeated", "is-hit", "is-wrong");
+  elements.slimeSprite.style.visibility = "visible";
+  elements.slimeShadow.classList.remove("is-hidden");
+  elements.worldStage.classList.remove("is-victory");
+  elements.damagePop.classList.remove("is-active");
+  elements.victoryToast.classList.remove("is-active");
+  elements.resultOverlay.classList.remove("is-active");
+  setCommandMode("encounter");
+  setMessage("スライムがあらわれた！");
+}
+
+function enterBattleWithProblem(problem) {
+  showScreen("game");
+  setCurrentProblem(problem);
+  renderProgress();
 }
 
 function hideHint() {
@@ -757,12 +1261,25 @@ function drawProblem() {
 }
 
 function startGame() {
+  showScreen("village");
+  renderProgress();
+  void ensureHeroName();
+}
+
+function enterBattle() {
+  state.currentAreaId = "";
+  state.currentProblemId = "";
   showScreen("game");
   if (!state.current || state.defeated) {
     drawProblem();
   } else {
     renderProgress();
   }
+}
+
+function openVillage() {
+  showScreen("village");
+  renderProgress();
 }
 
 function openProblem() {
@@ -835,6 +1352,21 @@ function markCorrect() {
     elements.slimeSprite.classList.add("is-defeated");
     elements.slimeShadow.classList.add("is-hidden");
   }, 300);
+
+  const clearedProblem = state.current;
+  void markRpgCleared(clearedProblem, { areaId: state.currentAreaId });
+  if (clearedProblem?.unlockGate) {
+    void unlockFieldGate(state.currentAreaId || clearedProblem.areaId || "expansion-grass", clearedProblem.unlockGate);
+  }
+  window.setTimeout(() => {
+    if (state.returnScreen === "field" && state.currentAreaId) {
+      showResultOverlay("討伐完了！", "good");
+      openGrassField();
+    } else if (state.currentAreaId) {
+      showResultOverlay("討伐完了！", "good");
+      showScreen("map");
+    }
+  }, 850);
 }
 
 function markWrong() {
@@ -889,9 +1421,604 @@ function resetProgress() {
   setMessage("記録をリセットした。");
 }
 
+let fieldState = null;
+let fieldRaf = null;
+let fieldLocked = false;
+const fieldAreaId = "expansion-grass";
+const fieldGateId = "old-road";
+const fieldActiveEnemyLimit = 7;
+const fieldHeroStart = { x: 8, y: 15 };
+const fieldSpecialSlimeTile = { x: 20, y: 11 };
+const fieldGateTiles = [
+  { x: 21, y: 11 },
+  { x: 22, y: 11 },
+  { x: 21, y: 12 }
+];
+
+function openGrassField() {
+  ensureProblemIds(fieldAreaId);
+  state.currentAreaId = fieldAreaId;
+  state.returnScreen = "field";
+  setupFieldState();
+  renderFieldHud();
+  showScreen("field");
+  startFieldLoop();
+}
+
+function renderFieldHud() {
+  const progress = computeAreaProgress(fieldAreaId);
+  if (elements.fieldTitle) elements.fieldTitle.textContent = "式と展開と因数分解の草原";
+  if (elements.fieldSub)
+    elements.fieldSub.textContent = isFieldGateUnlocked(fieldAreaId, fieldGateId)
+      ? "古い道が開いた。奥まで探索できる"
+      : "特殊スライムを倒すと道が開きそう";
+  if (elements.fieldTotal) elements.fieldTotal.textContent = String(progress.total);
+  if (elements.fieldCleared) elements.fieldCleared.textContent = String(progress.cleared);
+  if (elements.fieldPercent) elements.fieldPercent.textContent = `${progress.percent}%`;
+}
+
+function showFieldEncounter(text) {
+  if (elements.fieldMessageText) elements.fieldMessageText.textContent = text;
+  elements.fieldCanvas?.parentElement?.classList.add("is-encountering");
+  elements.fieldFade?.classList.remove("is-hidden");
+  elements.fieldMessage?.classList.remove("is-hidden");
+}
+
+function hideFieldEncounter() {
+  elements.fieldCanvas?.parentElement?.classList.remove("is-encountering");
+  elements.fieldFade?.classList.add("is-hidden");
+  elements.fieldMessage?.classList.add("is-hidden");
+}
+
+function setupFieldState() {
+  const width = 32;
+  const height = 22;
+  const tileSize = 32;
+  const groups = getFieldProblemGroups(fieldAreaId);
+  const specialAlreadyCleared = groups.special && isProblemCleared(groups.special.problemId);
+  let gateUnlocked = isFieldGateUnlocked(fieldAreaId, fieldGateId) || Boolean(specialAlreadyCleared);
+
+  if (gateUnlocked && !isFieldGateUnlocked(fieldAreaId, fieldGateId)) {
+    rpgState = { unlockedGates: {}, ...(rpgState || {}) };
+    rpgState.unlockedGates = { ...(rpgState.unlockedGates || {}), [fieldGateKey(fieldAreaId, fieldGateId)]: true };
+    void saveRpgState();
+  }
+
+  const tiles = buildGrassTiles(width, height, gateUnlocked);
+  const collision = buildCollision(tiles, width, height);
+  const enemies = buildFieldEnemies(groups, collision, tiles, width, height, gateUnlocked);
+
+  fieldState = {
+    width,
+    height,
+    tileSize,
+    tiles,
+    collision,
+    hero: {
+      x: fieldHeroStart.x,
+      y: fieldHeroStart.y,
+      fromX: fieldHeroStart.x,
+      fromY: fieldHeroStart.y,
+      toX: fieldHeroStart.x,
+      toY: fieldHeroStart.y,
+      moving: false,
+      startedAt: 0,
+      duration: 135,
+      facing: "down"
+    },
+    enemies,
+    encountering: false,
+    gateUnlocked
+  };
+  fieldLocked = false;
+  hideFieldEncounter();
+}
+
+function getFieldProblemGroups(areaId) {
+  const list = getAreaProblems(areaId);
+  const special = list.find((problem) => /研究2/.test(problem.source || "")) || list[list.length - 1] || null;
+  const normal = list.filter((problem) => problem.problemId !== special?.problemId && !isProblemCleared(problem.problemId));
+  return { normal, special };
+}
+
+function buildFieldEnemies(groups, collision, tiles, width, height, gateUnlocked) {
+  const enemies = [];
+  const occupied = new Set();
+
+  if (groups.special && !gateUnlocked && !isProblemCleared(groups.special.problemId)) {
+    enemies.push({
+      ...fieldSpecialSlimeTile,
+      kind: "special",
+      problemId: groups.special.problemId,
+      unlockGate: fieldGateId
+    });
+    occupied.add(`${fieldSpecialSlimeTile.x},${fieldSpecialSlimeTile.y}`);
+  }
+
+  const normalProblems = shuffleArray(groups.normal).slice(0, Math.max(0, fieldActiveEnemyLimit - enemies.length));
+  const candidates = getFieldSpawnCandidates(collision, tiles, width, height, occupied);
+
+  normalProblems.forEach((problem, index) => {
+    const tile = candidates[index];
+    if (!tile) return;
+    occupied.add(`${tile.x},${tile.y}`);
+    enemies.push({ ...tile, kind: "normal", problemId: problem.problemId });
+  });
+
+  return enemies;
+}
+
+function getFieldSpawnCandidates(collision, tiles, width, height, occupied) {
+  const candidates = [];
+  for (let y = 2; y < height - 2; y += 1) {
+    for (let x = 2; x < width - 2; x += 1) {
+      const key = `${x},${y}`;
+      const tile = tiles[y * width + x];
+      const distanceFromHero = Math.abs(x - fieldHeroStart.x) + Math.abs(y - fieldHeroStart.y);
+      if (collision.has(key) || occupied.has(key) || tile === 2 || tile === 3 || tile === 4) continue;
+      if (distanceFromHero < 5) continue;
+      if (fieldGateTiles.some((gate) => Math.abs(gate.x - x) + Math.abs(gate.y - y) < 2)) continue;
+      candidates.push({ x, y });
+    }
+  }
+  return shuffleArray(candidates);
+}
+
+function shuffleArray(items) {
+  const copy = items.slice();
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function buildGrassTiles(width, height, gateUnlocked) {
+  const tiles = new Array(width * height).fill(0);
+  for (let y = 0; y < height; y += 1) {
+    const riverX = y < 10 ? 4 : 5;
+    setFieldTile(tiles, width, riverX, y, 2);
+    setFieldTile(tiles, width, riverX + 1, y, 2);
+  }
+  for (let y = 15; y < height; y += 1) {
+    setFieldTile(tiles, width, 27, y, 2);
+    setFieldTile(tiles, width, 28, y, 2);
+  }
+  for (let x = 6; x < width - 2; x += 1) {
+    setFieldTile(tiles, width, x, 11, 1);
+  }
+  for (let y = 7; y < height - 2; y += 1) {
+    setFieldTile(tiles, width, 8, y, 1);
+  }
+  for (let y = 11; y < 17; y += 1) {
+    setFieldTile(tiles, width, 16, y, 1);
+  }
+  [
+    { x: 2, y: 2 },
+    { x: 3, y: 2 },
+    { x: 2, y: 3 },
+    { x: 24, y: 3 },
+    { x: 25, y: 3 },
+    { x: 24, y: 4 },
+    { x: 12, y: 4 },
+    { x: 13, y: 4 },
+    { x: 29, y: 8 },
+    { x: 30, y: 8 },
+    { x: 12, y: 15 },
+    { x: 13, y: 15 },
+    { x: 13, y: 16 },
+    { x: 22, y: 16 },
+    { x: 23, y: 16 },
+    { x: 22, y: 17 }
+  ].forEach((position) => setFieldTile(tiles, width, position.x, position.y, 3));
+  fieldGateTiles.forEach((position) => setFieldTile(tiles, width, position.x, position.y, gateUnlocked ? 1 : 4));
+  return tiles;
+}
+
+function setFieldTile(tiles, width, x, y, value) {
+  const height = tiles.length / width;
+  if (x < 0 || y < 0 || x >= width || y >= height) return;
+  tiles[y * width + x] = value;
+}
+
+function buildCollision(tiles, width, height) {
+  const blocked = new Set();
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const tile = tiles[y * width + x];
+      if (tile === 2 || tile === 3 || tile === 4) blocked.add(`${x},${y}`);
+    }
+  }
+  return blocked;
+}
+
+function getFieldEnemyAt(x, y) {
+  if (!fieldState) return null;
+  return fieldState.enemies.find((enemy) => enemy.x === x && enemy.y === y) || null;
+}
+
+function attemptFieldMove(dx, dy) {
+  if (!fieldState || fieldLocked) return;
+  const hero = fieldState.hero;
+  if (hero.moving || fieldState.encountering) return;
+  const nextX = hero.x + dx;
+  const nextY = hero.y + dy;
+  hero.facing = dx > 0 ? "right" : dx < 0 ? "left" : dy > 0 ? "down" : "up";
+  if (nextX < 0 || nextY < 0 || nextX >= fieldState.width || nextY >= fieldState.height) return;
+  if (fieldState.collision.has(`${nextX},${nextY}`)) return;
+  const enemy = getFieldEnemyAt(nextX, nextY);
+  if (enemy) {
+    startFieldEncounter(enemy);
+    return;
+  }
+  hero.fromX = hero.x;
+  hero.fromY = hero.y;
+  hero.toX = nextX;
+  hero.toY = nextY;
+  hero.x = nextX;
+  hero.y = nextY;
+  hero.moving = true;
+  hero.startedAt = performance.now();
+}
+
+function startFieldEncounter(enemy) {
+  if (!fieldState) return;
+  const baseProblem = getAreaProblems(fieldAreaId).find((item) => item.problemId === enemy.problemId);
+  if (!baseProblem) return;
+  const problem = {
+    ...baseProblem,
+    areaId: fieldAreaId,
+    enemyKind: enemy.kind || "normal",
+    unlockGate: enemy.unlockGate || ""
+  };
+  fieldState.encountering = true;
+  fieldLocked = true;
+  showFieldEncounter(enemy.kind === "special" ? "強そうなスライムが道をふさいだ！" : "スライムがあらわれた！");
+  window.setTimeout(() => {
+    hideFieldEncounter();
+    fieldState.encountering = false;
+    fieldLocked = false;
+    state.returnScreen = "field";
+    enterBattleWithProblem(problem);
+  }, 1000);
+}
+
+function startFieldLoop() {
+  if (!elements.fieldCanvas) return;
+  if (fieldRaf) cancelAnimationFrame(fieldRaf);
+  const tick = () => {
+    drawField();
+    fieldRaf = requestAnimationFrame(tick);
+  };
+  fieldRaf = requestAnimationFrame(tick);
+}
+
+function stopFieldLoop() {
+  if (!fieldRaf) return;
+  cancelAnimationFrame(fieldRaf);
+  fieldRaf = null;
+}
+
+function drawField() {
+  if (!fieldState || !elements.fieldCanvas) return;
+  const canvas = elements.fieldCanvas;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = Math.max(320, Math.floor(rect.width));
+  const cssHeight = Math.max(260, Math.floor(rect.height));
+  const targetWidth = Math.floor(cssWidth * dpr);
+  const targetHeight = Math.floor(cssHeight * dpr);
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  fieldState.tileSize = getResponsiveFieldTileSize(cssWidth, cssHeight);
+  const { width, height, tileSize, tiles } = fieldState;
+  const heroPixel = getHeroPixel();
+  const mapWidth = width * tileSize;
+  const mapHeight = height * tileSize;
+  const cameraX = getFieldCameraOffset(heroPixel.x, mapWidth, cssWidth);
+  const cameraY = getFieldCameraOffset(heroPixel.y, mapHeight, cssHeight);
+
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  drawFieldBackdrop(ctx, cssWidth, cssHeight);
+  const startX = Math.max(0, Math.floor(-cameraX / tileSize) - 1);
+  const endX = Math.min(width, Math.ceil((-cameraX + cssWidth) / tileSize) + 1);
+  const startY = Math.max(0, Math.floor(-cameraY / tileSize) - 1);
+  const endY = Math.min(height, Math.ceil((-cameraY + cssHeight) / tileSize) + 1);
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      drawFieldTile(ctx, x, y, tileSize, cameraX, cameraY, tiles[y * width + x]);
+    }
+  }
+
+  const sprites = fieldState.enemies
+    .filter((enemy) => !isProblemCleared(enemy.problemId))
+    .map((enemy) => ({
+      depth: (enemy.y + 0.7) * tileSize,
+      draw: () => drawFieldSlime(ctx, enemy.x, enemy.y, tileSize, cameraX, cameraY, enemy.kind)
+    }));
+  sprites.push({
+    depth: heroPixel.y + tileSize * 0.4,
+    draw: () => drawFieldHero(ctx, heroPixel.x + cameraX, heroPixel.y + cameraY, tileSize, fieldState.hero)
+  });
+  sprites.sort((a, b) => a.depth - b.depth).forEach((sprite) => sprite.draw());
+
+  const hero = fieldState.hero;
+  if (hero.moving && performance.now() - hero.startedAt >= hero.duration) {
+    hero.moving = false;
+  }
+}
+
+function getHeroPixel() {
+  const hero = fieldState.hero;
+  const tileSize = fieldState.tileSize;
+  if (!hero.moving) return { x: (hero.x + 0.5) * tileSize, y: (hero.y + 0.5) * tileSize };
+  const t = clampNumber((performance.now() - hero.startedAt) / hero.duration, 0, 1);
+  const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  return {
+    x: (hero.fromX + (hero.toX - hero.fromX) * eased + 0.5) * tileSize,
+    y: (hero.fromY + (hero.toY - hero.fromY) * eased + 0.5) * tileSize
+  };
+}
+
+function getResponsiveFieldTileSize(viewWidth, viewHeight) {
+  const targetColumns = viewWidth >= 1100 ? 25 : viewWidth >= 760 ? 21 : 14;
+  const targetRows = viewHeight >= 660 ? 17 : viewHeight >= 520 ? 14 : 12;
+  return clampNumber(Math.floor(Math.min(viewWidth / targetColumns, viewHeight / targetRows)), 24, 42);
+}
+
+function getFieldCameraOffset(center, mapSize, viewSize) {
+  if (mapSize <= viewSize) return (viewSize - mapSize) / 2;
+  return clampNumber(viewSize / 2 - center, viewSize - mapSize, 0);
+}
+
+function clampNumber(value, minValue, maxValue) {
+  return Math.max(minValue, Math.min(maxValue, value));
+}
+
+function drawFieldBackdrop(ctx, width, height) {
+  const sky = ctx.createLinearGradient(0, 0, 0, height);
+  sky.addColorStop(0, "#7fc7df");
+  sky.addColorStop(0.24, "#9edc9f");
+  sky.addColorStop(1, "#1f6e3e");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(44, 128, 70, 0.38)";
+  ctx.beginPath();
+  ctx.ellipse(width * 0.28, height * 0.15, width * 0.38, height * 0.13, 0, 0, Math.PI * 2);
+  ctx.ellipse(width * 0.76, height * 0.14, width * 0.35, height * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawFieldTile(ctx, x, y, tileSize, cameraX, cameraY, type) {
+  const px = x * tileSize + cameraX;
+  const py = y * tileSize + cameraY;
+  const tileSeed = (x * 17 + y * 31) % 11;
+  if (type === 2) {
+    const water = ctx.createLinearGradient(px, py, px, py + tileSize);
+    water.addColorStop(0, "#2e93bf");
+    water.addColorStop(1, "#1d5f93");
+    ctx.fillStyle = water;
+    ctx.fillRect(px, py, tileSize, tileSize);
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = Math.max(1, tileSize * 0.04);
+    ctx.beginPath();
+    ctx.moveTo(px + tileSize * 0.12, py + tileSize * 0.38);
+    ctx.quadraticCurveTo(px + tileSize * 0.36, py + tileSize * 0.28, px + tileSize * 0.58, py + tileSize * 0.38);
+    ctx.quadraticCurveTo(px + tileSize * 0.78, py + tileSize * 0.48, px + tileSize * 0.94, py + tileSize * 0.36);
+    ctx.stroke();
+    return;
+  }
+  if (type === 1) {
+    ctx.fillStyle = "#b78e57";
+    ctx.fillRect(px, py, tileSize, tileSize);
+    ctx.fillStyle = "rgba(73,49,29,0.16)";
+    ctx.fillRect(px + tileSize * 0.18, py + tileSize * 0.22, tileSize * 0.12, tileSize * 0.08);
+    ctx.fillRect(px + tileSize * 0.62, py + tileSize * 0.66, tileSize * 0.16, tileSize * 0.07);
+    return;
+  }
+  const noise = tileSeed / 11;
+  ctx.fillStyle = `rgb(${34 + Math.floor(noise * 8)}, ${112 + Math.floor(noise * 36)}, ${54 + Math.floor(noise * 10)})`;
+  ctx.fillRect(px, py, tileSize, tileSize);
+  ctx.fillStyle = "rgba(214,255,170,0.22)";
+  ctx.fillRect(px + tileSize * 0.18, py + tileSize * 0.18, Math.max(1, tileSize * 0.06), tileSize * 0.22);
+  ctx.fillRect(px + tileSize * 0.74, py + tileSize * 0.28, Math.max(1, tileSize * 0.05), tileSize * 0.18);
+  if (tileSeed === 2 || tileSeed === 7) {
+    ctx.fillStyle = tileSeed === 2 ? "#f4e278" : "#ff9db3";
+    ctx.beginPath();
+    ctx.arc(px + tileSize * 0.58, py + tileSize * 0.64, Math.max(1.5, tileSize * 0.045), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (type === 3) {
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.beginPath();
+    ctx.ellipse(px + tileSize * 0.55, py + tileSize * 0.76, tileSize * 0.22, tileSize * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if ((x + y) % 2 === 0) {
+      ctx.fillStyle = "#6d523d";
+      ctx.fillRect(px + tileSize * 0.45, py + tileSize * 0.52, tileSize * 0.12, tileSize * 0.27);
+      ctx.fillStyle = "#244d2d";
+      ctx.beginPath();
+      ctx.arc(px + tileSize * 0.5, py + tileSize * 0.42, tileSize * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#2f6f3b";
+      ctx.beginPath();
+      ctx.arc(px + tileSize * 0.36, py + tileSize * 0.5, tileSize * 0.18, 0, Math.PI * 2);
+      ctx.arc(px + tileSize * 0.64, py + tileSize * 0.5, tileSize * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#6d756c";
+      ctx.beginPath();
+      ctx.ellipse(px + tileSize * 0.5, py + tileSize * 0.58, tileSize * 0.24, tileSize * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(px + tileSize * 0.42, py + tileSize * 0.5, tileSize * 0.08, tileSize * 0.04, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (type === 4) {
+    ctx.fillStyle = "#726158";
+    ctx.fillRect(px, py, tileSize, tileSize);
+    ctx.fillStyle = "#493d39";
+    ctx.beginPath();
+    ctx.moveTo(px + tileSize * 0.12, py + tileSize * 0.72);
+    ctx.lineTo(px + tileSize * 0.34, py + tileSize * 0.28);
+    ctx.lineTo(px + tileSize * 0.58, py + tileSize * 0.72);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#8b7d73";
+    ctx.beginPath();
+    ctx.moveTo(px + tileSize * 0.43, py + tileSize * 0.74);
+    ctx.lineTo(px + tileSize * 0.68, py + tileSize * 0.22);
+    ctx.lineTo(px + tileSize * 0.9, py + tileSize * 0.74);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawFieldSlime(ctx, x, y, tileSize, cameraX, cameraY, kind = "normal") {
+  const cx = (x + 0.5) * tileSize + cameraX;
+  const bob = Math.sin(performance.now() / 280 + x * 0.8 + y * 0.4) * tileSize * 0.035;
+  const cy = (y + 0.56) * tileSize + cameraY + bob;
+  const isSpecial = kind === "special";
+  const radius = tileSize * (isSpecial ? 0.32 : 0.25);
+  const bodyColor = isSpecial ? "#a561ff" : "#55c8ff";
+  const bodyDark = isSpecial ? "#6430a9" : "#2680bd";
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + tileSize * 0.24, radius * 0.95, tileSize * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.moveTo(cx - radius, cy + tileSize * 0.02);
+  ctx.quadraticCurveTo(cx - radius * 0.62, cy - radius * 0.76, cx, cy - radius * 0.92);
+  ctx.quadraticCurveTo(cx + radius * 0.62, cy - radius * 0.76, cx + radius, cy + tileSize * 0.02);
+  ctx.quadraticCurveTo(cx + radius * 0.82, cy + radius * 0.92, cx, cy + radius * 0.88);
+  ctx.quadraticCurveTo(cx - radius * 0.82, cy + radius * 0.92, cx - radius, cy + tileSize * 0.02);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = bodyDark;
+  ctx.lineWidth = Math.max(2, tileSize * 0.055);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.beginPath();
+  ctx.arc(cx - radius * 0.3, cy - radius * 0.34, radius * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#17120a";
+  ctx.beginPath();
+  ctx.arc(cx - radius * 0.28, cy, Math.max(2, radius * 0.09), 0, Math.PI * 2);
+  ctx.arc(cx + radius * 0.28, cy, Math.max(2, radius * 0.09), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#17120a";
+  ctx.lineWidth = Math.max(1.5, tileSize * 0.035);
+  ctx.beginPath();
+  ctx.arc(cx, cy + radius * 0.16, radius * 0.22, 0.1 * Math.PI, 0.9 * Math.PI);
+  ctx.stroke();
+  if (isSpecial) {
+    ctx.fillStyle = "#ffdc5c";
+    ctx.strokeStyle = "#6b4b00";
+    ctx.lineWidth = Math.max(1.5, tileSize * 0.035);
+    ctx.beginPath();
+    ctx.moveTo(cx - radius * 0.48, cy - radius * 0.82);
+    ctx.lineTo(cx - radius * 0.2, cy - radius * 1.2);
+    ctx.lineTo(cx, cy - radius * 0.86);
+    ctx.lineTo(cx + radius * 0.24, cy - radius * 1.22);
+    ctx.lineTo(cx + radius * 0.5, cy - radius * 0.82);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawFieldHero(ctx, cx, cy, tileSize, hero) {
+  const moveT = hero.moving ? clampNumber((performance.now() - hero.startedAt) / hero.duration, 0, 1) : 0;
+  const bob = hero.moving ? Math.sin(moveT * Math.PI) * tileSize * 0.09 : 0;
+  const baseY = cy - bob;
+  const unit = tileSize / 32;
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + tileSize * 0.34, tileSize * 0.28, tileSize * 0.09, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#2762b0";
+  ctx.strokeStyle = "#17120a";
+  ctx.lineWidth = Math.max(2, 2.5 * unit);
+  ctx.beginPath();
+  drawFieldRoundedRect(ctx, cx - 7 * unit, baseY - 1 * unit, 14 * unit, 16 * unit, 3 * unit);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#b9273c";
+  ctx.beginPath();
+  ctx.moveTo(cx - 8 * unit, baseY);
+  ctx.lineTo(cx - 15 * unit, baseY + 18 * unit);
+  ctx.lineTo(cx - 2 * unit, baseY + 13 * unit);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffe48d";
+  ctx.strokeStyle = "#20170a";
+  ctx.lineWidth = Math.max(2, 2.4 * unit);
+  ctx.beginPath();
+  ctx.arc(cx, baseY - 11 * unit, 10 * unit, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#7a4b28";
+  ctx.beginPath();
+  ctx.arc(cx - 3 * unit, baseY - 17 * unit, 8 * unit, Math.PI, Math.PI * 2);
+  ctx.arc(cx + 4 * unit, baseY - 16 * unit, 7 * unit, Math.PI, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#1b1a21";
+  ctx.fillRect(cx - 4 * unit, baseY - 12 * unit, 2 * unit, 2 * unit);
+  ctx.fillRect(cx + 3 * unit, baseY - 12 * unit, 2 * unit, 2 * unit);
+  ctx.strokeStyle = "#1b1a21";
+  ctx.lineWidth = Math.max(1.4, 1.5 * unit);
+  ctx.beginPath();
+  ctx.arc(cx, baseY - 8 * unit, 3 * unit, 0.1 * Math.PI, 0.9 * Math.PI);
+  ctx.stroke();
+  ctx.fillStyle = "#c9d7e8";
+  ctx.strokeStyle = "#17120a";
+  ctx.lineWidth = Math.max(1.5, 2 * unit);
+  ctx.beginPath();
+  drawFieldRoundedRect(ctx, cx - 15 * unit, baseY + 1 * unit, 8 * unit, 11 * unit, 3 * unit);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "#d7dde8";
+  ctx.lineWidth = Math.max(2, 2.5 * unit);
+  const swordSide = hero.facing === "left" ? -1 : 1;
+  ctx.beginPath();
+  ctx.moveTo(cx + swordSide * 11 * unit, baseY + 12 * unit);
+  ctx.lineTo(cx + swordSide * 19 * unit, baseY - 8 * unit);
+  ctx.stroke();
+  ctx.fillStyle = "#8b5d2c";
+  ctx.fillRect(cx + Math.min(swordSide * 8 * unit, swordSide * 14 * unit), baseY + 9 * unit, 6 * unit, 3 * unit);
+}
+
+function drawFieldRoundedRect(ctx, x, y, width, height, radius) {
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, width, height, radius);
+    return;
+  }
+  const r = Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
 elements.startButton.addEventListener("click", startGame);
 elements.resetButton.addEventListener("click", resetProgress);
-elements.homeButton.addEventListener("click", () => showScreen("home"));
+elements.homeButton.addEventListener("click", openVillage);
 elements.attackButton.addEventListener("click", openProblem);
 elements.answerButton.addEventListener("click", revealSolution);
 elements.hintButton.addEventListener("click", showHint);
@@ -900,6 +2027,102 @@ elements.wrongButton.addEventListener("click", markWrong);
 elements.retryButton.addEventListener("click", retryProblem);
 elements.nextButton.addEventListener("click", drawProblem);
 
+if (elements.toMapButton) elements.toMapButton.addEventListener("click", () => showScreen("map"));
+if (elements.toOfficeButton) elements.toOfficeButton.addEventListener("click", () => showScreen("office"));
+if (elements.toStatusButton)
+  elements.toStatusButton.addEventListener("click", () => {
+    renderProgress();
+    showScreen("status");
+  });
+if (elements.toPracticeButton) elements.toPracticeButton.addEventListener("click", enterBattle);
+if (elements.backHomeFromVillageButton) elements.backHomeFromVillageButton.addEventListener("click", () => showScreen("home"));
+if (elements.backVillageFromMapButton) elements.backVillageFromMapButton.addEventListener("click", openVillage);
+if (elements.backVillageFromStatusButton) elements.backVillageFromStatusButton.addEventListener("click", openVillage);
+if (elements.backVillageFromOfficeButton) elements.backVillageFromOfficeButton.addEventListener("click", openVillage);
+if (elements.areaExpansionButton) elements.areaExpansionButton.addEventListener("click", openGrassField);
+if (elements.areaBackMapButton) elements.areaBackMapButton.addEventListener("click", () => showScreen("map"));
+if (elements.areaBackVillageButton) elements.areaBackVillageButton.addEventListener("click", openVillage);
+if (elements.areaBackVillageButton2) elements.areaBackVillageButton2.addEventListener("click", openVillage);
+if (elements.fieldBackButton) elements.fieldBackButton.addEventListener("click", () => showScreen("map"));
+if (elements.fieldBackVillageButton) elements.fieldBackVillageButton.addEventListener("click", openVillage);
+if (elements.dpadUp) elements.dpadUp.addEventListener("click", () => attemptFieldMove(0, -1));
+if (elements.dpadDown) elements.dpadDown.addEventListener("click", () => attemptFieldMove(0, 1));
+if (elements.dpadLeft) elements.dpadLeft.addEventListener("click", () => attemptFieldMove(-1, 0));
+if (elements.dpadRight) elements.dpadRight.addEventListener("click", () => attemptFieldMove(1, 0));
+
+window.addEventListener("keydown", (event) => {
+  if (!elements.fieldScreen?.classList.contains("is-active")) return;
+  const key = event.key.toLowerCase();
+  if (key === "arrowup" || key === "w") {
+    event.preventDefault();
+    attemptFieldMove(0, -1);
+  } else if (key === "arrowdown" || key === "s") {
+    event.preventDefault();
+    attemptFieldMove(0, 1);
+  } else if (key === "arrowleft" || key === "a") {
+    event.preventDefault();
+    attemptFieldMove(-1, 0);
+  } else if (key === "arrowright" || key === "d") {
+    event.preventDefault();
+    attemptFieldMove(1, 0);
+  }
+});
+
+function showHeroNameError(message) {
+  elements.heroNameError.textContent = message;
+  elements.heroNameError.classList.remove("is-hidden");
+}
+
+async function submitHeroName() {
+  const proposed = normalizeHeroName(elements.heroNameInput.value);
+  if (!proposed) {
+    showHeroNameError("勇者名を入力してください。");
+    return;
+  }
+
+  elements.heroNameError.classList.add("is-hidden");
+  elements.heroNameError.textContent = "";
+
+  try {
+    if (currentUser && db) {
+      await saveProfileHeroName(proposed);
+    } else {
+      setHeroNameLocal(proposed);
+    }
+    closeHeroNameModal();
+  } catch (error) {
+    console.warn("Hero name save failed", error);
+    showHeroNameError("保存に失敗しました。通信状態を確認してください。");
+  }
+}
+
+if (elements.renameHeroButton) elements.renameHeroButton.addEventListener("click", () => openHeroNameModal({ force: false }));
+if (elements.statusRenameButton) elements.statusRenameButton.addEventListener("click", () => openHeroNameModal({ force: false }));
+
+if (elements.heroNameSaveButton) elements.heroNameSaveButton.addEventListener("click", () => void submitHeroName());
+if (elements.heroNameCancelButton)
+  elements.heroNameCancelButton.addEventListener("click", () => {
+    const forced = elements.heroNameModal?.dataset?.force === "1";
+    if (forced) return;
+    closeHeroNameModal();
+  });
+if (elements.heroNameModal)
+  elements.heroNameModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target || !target.dataset) return;
+    if (target.dataset.close !== "heroNameModal") return;
+    const forced = elements.heroNameModal?.dataset?.force === "1";
+    if (forced) return;
+    closeHeroNameModal();
+  });
+if (elements.heroNameInput)
+  elements.heroNameInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void submitHeroName();
+  });
+
 loadProgress();
 initFirebase();
+ensureProblemIds("expansion-grass");
 deck = shuffle(problems);
